@@ -26,6 +26,15 @@ Long lectures are split into 10-minute chunks by default:
 python run_whisper.py lecture.mp4 --chunk-seconds 600 --overlap-seconds 5 --output timestamps.txt
 ```
 
+For a quick 5-minute prototype run:
+
+```powershell
+python run_whisper.py lecture.mp4 --prototype-5min --plan-only
+python run_whisper.py lecture.mp4 --prototype-5min --output prototype_timestamps.txt --json prototype_result.json
+```
+
+This processes only the first 5 minutes and uses 60-second chunks with the default 5-second overlap.
+
 You can also save the raw Whisper output:
 
 ```powershell
