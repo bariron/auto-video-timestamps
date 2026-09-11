@@ -41,6 +41,20 @@ You can also save the raw Whisper output:
 python run_whisper.py path\to\video.mp4 --output timestamps.txt --json result.json
 ```
 
+## Generate Chapters
+
+After transcription, use a small language model to group speech segments into meaningful chapters:
+
+```powershell
+python generate_chapters.py result.json --output chapters.txt --json chapters.json
+```
+
+For a cheap first check without loading the language model:
+
+```powershell
+python generate_chapters.py result.json --dry-run --prompt-output chapter_prompt.txt
+```
+
 ## Roadmap
 
 - Generate speech-based timestamps.
