@@ -63,6 +63,12 @@ After transcription, use a small language model to group speech segments into me
 python generate_chapters.py result.json --output chapters.txt --json chapters.json
 ```
 
+By default, chapter generation uses exact Whisper segments as timestamps. For very long lectures, you can use the compressed mode:
+
+```powershell
+python generate_chapters.py result.json --prompt-mode compressed --output chapters.txt --json chapters.json
+```
+
 For a cheap first check without loading the language model:
 
 ```powershell

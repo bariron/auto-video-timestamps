@@ -109,10 +109,32 @@ def build_topic_windows(
     return windows
 
 
-def build_prompt(windows: list[dict], min_chapters: int, max_chapters: int) -> str:
+def build_exact_segments(chunks: list[dict]) -> list[dict]:
+    segments = []
+    for chunk in chunks:
+        text = str(chunk.get("text", "")).strip()
+        if not text:
+            continue
+
+        segments.append(
+            {
+                "start": chunk_start_seconds(chunk),
+                "text": text,
+            }
+        )
+
+    return segments
+
+
+def build_prompt(
+    transcript_parts: list[dict],
+    min_chapters: int,
+    max_chapters: int,
+    prompt_mode: str,
+) -> str:
     transcript = "\n".join(
-        f"[{format_timestamp(window['start'])}] {window['text']}"
-        for window in windows
+        f"[{format_timestamp(part['start'])}] {part['text']}"
+        for part in transcript_parts
     )
     return f"""Ты помогаешь делать качественные таймкоды для длинных видео и лекций.
 
@@ -122,7 +144,8 @@ def build_prompt(windows: list[dict], min_chapters: int, max_chapters: int) -> s
 - Названия должны быть короткими, конкретными и полезными зрителю.
 - Если это математическая лекция, сохраняй термины, определения, теоремы, примеры и переходы между темами.
 - Избегай общих названий вроде "продолжение работы", "детали алгоритма", "примеры использования", если можно назвать конкретный математический объект или шаг.
-- Используй только таймкоды, которые есть в транскрипте.
+- Таймкод главы должен быть временем первой фразы, с которой реально начинается новая тема.
+- Используй только таймкоды, которые есть в транскрипте ниже.
 - Верни не больше {max_chapters} глав.
 - Верни только JSON-массив без Markdown.
 
@@ -136,6 +159,7 @@ def build_prompt(windows: list[dict], min_chapters: int, max_chapters: int) -> s
 ]
 
 Количество глав: от {min_chapters} до {max_chapters}.
+Режим транскрипта: {prompt_mode}.
 
 Транскрипт:
 {transcript}
@@ -312,13 +336,25 @@ def main() -> None:
         "--window-seconds",
         type=int,
         default=180,
-        help="Transcript compression window in seconds. Default: 180.",
+        help="Transcript compression window in seconds for compressed mode. Default: 180.",
     )
     parser.add_argument(
         "--max-window-chars",
         type=int,
         default=900,
-        help="Maximum transcript characters per window. Default: 900.",
+        help="Maximum transcript characters per window for compressed mode. Default: 900.",
+    )
+    parser.add_argument(
+        "--prompt-mode",
+        choices=("exact", "compressed"),
+        default="exact",
+        help="Use exact Whisper segments or compressed time windows. Default: exact.",
+    )
+    parser.add_argument(
+        "--max-prompt-chars",
+        type=int,
+        default=120000,
+        help="Fail if the generated prompt is longer than this. Default: 120000.",
     )
     parser.add_argument("--min-chapters", type=int, default=4)
     parser.add_argument("--max-chapters", type=int, default=10)
@@ -332,8 +368,26 @@ def main() -> None:
     args = parser.parse_args()
 
     chunks = load_whisper_chunks(args.input_json)
-    windows = build_topic_windows(chunks, args.window_seconds, args.max_window_chars)
-    prompt = build_prompt(windows, args.min_chapters, args.max_chapters)
+    if args.prompt_mode == "exact":
+        transcript_parts = build_exact_segments(chunks)
+    else:
+        transcript_parts = build_topic_windows(
+            chunks,
+            args.window_seconds,
+            args.max_window_chars,
+        )
+
+    prompt = build_prompt(
+        transcript_parts,
+        args.min_chapters,
+        args.max_chapters,
+        args.prompt_mode,
+    )
+    if len(prompt) > args.max_prompt_chars:
+        raise ValueError(
+            "Generated prompt is too long: "
+            f"{len(prompt)} chars. Use --prompt-mode compressed or increase --max-prompt-chars."
+        )
 
     if args.prompt_output:
         args.prompt_output.write_text(prompt, encoding="utf-8")
