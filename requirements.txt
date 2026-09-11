@@ -3,3 +3,4 @@ transformers
 accelerate
 imageio-ffmpeg
 numpy
+reportlab
