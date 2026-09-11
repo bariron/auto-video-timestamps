@@ -16,6 +16,20 @@ pip install -r requirements.txt
 
 ## Usage
 
+Put lecture videos or audio files into `data/`. Generated transcripts and timestamps go to `outputs/`.
+
+Process every lecture from `data/`:
+
+```powershell
+python process_data.py
+```
+
+For a quick test on the first 5 minutes of every file:
+
+```powershell
+python process_data.py --max-duration-seconds 300 --chunk-seconds 60
+```
+
 ```powershell
 python run_whisper.py path\to\video.mp4 --output timestamps.txt
 ```

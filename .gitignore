@@ -5,6 +5,11 @@ __pycache__/
 .env
 .env.*
 
+data/*
+!data/.gitkeep
+outputs/*
+!outputs/.gitkeep
+
 *.wav
 *.mp3
 *.mp4
