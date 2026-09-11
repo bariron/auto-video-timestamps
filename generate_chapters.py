@@ -5,6 +5,29 @@ from pathlib import Path
 
 
 DEFAULT_CHAPTER_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+GENERIC_TITLE_KEYWORDS = (
+    "продолжение",
+    "работы",
+    "детали",
+    "ресурсы",
+    "примеры",
+    "использования",
+    "обработка",
+    "мусора",
+)
+TECHNICAL_TITLE_KEYWORDS = (
+    "z-функц",
+    "z функц",
+    "lcp",
+    "алгоритм",
+    "подстрок",
+    "префикс",
+    "суффикс",
+    "строк",
+    "блок",
+    "метрик",
+    "проход",
+)
 
 
 def format_timestamp(seconds: float | None) -> str:
@@ -15,6 +38,15 @@ def format_timestamp(seconds: float | None) -> str:
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def parse_timestamp(value: str) -> int | None:
+    match = re.fullmatch(r"(\d{2}):(\d{2}):(\d{2})", str(value).strip())
+    if not match:
+        return None
+
+    hours, minutes, seconds = map(int, match.groups())
+    return hours * 3600 + minutes * 60 + seconds
 
 
 def load_whisper_chunks(input_path: Path) -> list[dict]:
@@ -89,7 +121,9 @@ def build_prompt(windows: list[dict], min_chapters: int, max_chapters: int) -> s
 - Не делай главу на каждую мелкую фразу.
 - Названия должны быть короткими, конкретными и полезными зрителю.
 - Если это математическая лекция, сохраняй термины, определения, теоремы, примеры и переходы между темами.
+- Избегай общих названий вроде "продолжение работы", "детали алгоритма", "примеры использования", если можно назвать конкретный математический объект или шаг.
 - Используй только таймкоды, которые есть в транскрипте.
+- Верни не больше {max_chapters} глав.
 - Верни только JSON-массив без Markdown.
 
 Формат:
@@ -155,6 +189,83 @@ def extract_json_array(text: str) -> list[dict]:
     return chapters
 
 
+def title_score(title: str) -> int:
+    normalized = title.casefold()
+    score = 0
+    for keyword in TECHNICAL_TITLE_KEYWORDS:
+        if keyword in normalized:
+            score += 3
+    for keyword in GENERIC_TITLE_KEYWORDS:
+        if keyword in normalized:
+            score -= 1
+    if 12 <= len(title) <= 60:
+        score += 1
+    return score
+
+
+def normalize_chapters(
+    chapters: list[dict],
+    min_gap_seconds: int,
+    max_chapters: int,
+) -> list[dict]:
+    if max_chapters <= 0:
+        raise ValueError("--max-chapters must be greater than 0")
+    if min_gap_seconds < 0:
+        raise ValueError("--min-gap-seconds must be 0 or greater")
+
+    prepared = []
+    for chapter in chapters:
+        start = parse_timestamp(chapter.get("start", ""))
+        title = str(chapter.get("title", "")).strip()
+        summary = str(chapter.get("summary", "")).strip()
+        if start is None or not title:
+            continue
+
+        prepared.append(
+            {
+                "start_seconds": start,
+                "start": format_timestamp(start),
+                "title": title,
+                "summary": summary,
+                "score": title_score(title),
+            }
+        )
+
+    prepared.sort(key=lambda chapter: chapter["start_seconds"])
+    deduped = []
+    for chapter in prepared:
+        if not deduped:
+            deduped.append(chapter)
+            continue
+
+        previous = deduped[-1]
+        if chapter["start_seconds"] - previous["start_seconds"] < min_gap_seconds:
+            if chapter["score"] > previous["score"]:
+                deduped[-1] = chapter
+            continue
+
+        deduped.append(chapter)
+
+    while len(deduped) > max_chapters:
+        removable = min(
+            range(1, len(deduped)),
+            key=lambda index: (
+                deduped[index]["score"],
+                deduped[index]["start_seconds"] - deduped[index - 1]["start_seconds"],
+            ),
+        )
+        deduped.pop(removable)
+
+    return [
+        {
+            key: chapter[key]
+            for key in ("start", "title", "summary")
+            if chapter.get(key)
+        }
+        for chapter in deduped
+    ]
+
+
 def render_youtube_chapters(chapters: list[dict]) -> str:
     lines = []
     for chapter in chapters:
@@ -211,6 +322,12 @@ def main() -> None:
     )
     parser.add_argument("--min-chapters", type=int, default=4)
     parser.add_argument("--max-chapters", type=int, default=10)
+    parser.add_argument(
+        "--min-gap-seconds",
+        type=int,
+        default=180,
+        help="Minimum distance between final chapters. Default: 180.",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=1200)
     args = parser.parse_args()
 
@@ -226,7 +343,11 @@ def main() -> None:
         return
 
     model_output = generate_text(args.model, prompt, args.max_new_tokens)
-    chapters = extract_json_array(model_output)
+    chapters = normalize_chapters(
+        extract_json_array(model_output),
+        args.min_gap_seconds,
+        args.max_chapters,
+    )
 
     args.json.write_text(
         json.dumps(chapters, ensure_ascii=False, indent=2),
