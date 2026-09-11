@@ -5,16 +5,20 @@ import re
 import subprocess
 import sys
 import tempfile
+import wave
 from pathlib import Path
+
+import numpy as np
 
 
 DEFAULT_MODEL = "coriollon/whisper-large-v3-turbo-russian-codeswitch"
 SAMPLE_RATE = 16000
+MIN_SEGMENT_SECONDS = 1.0
 
 
-def format_timestamp(seconds: float | None) -> str:
+def format_timestamp(seconds: float | None, unknown: str = "00:00:00") -> str:
     if seconds is None:
-        return "00:00:00"
+        return unknown
 
     total_seconds = int(round(seconds))
     hours, remainder = divmod(total_seconds, 3600)
@@ -32,7 +36,7 @@ def build_pipeline(model_name: str):
     return pipeline(
         task="automatic-speech-recognition",
         model=model_name,
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         device=device,
     )
 
@@ -102,14 +106,35 @@ def extract_audio_chunk(
             "1",
             "-ar",
             str(SAMPLE_RATE),
+            "-acodec",
+            "pcm_s16le",
             str(output_path),
         ]
     )
 
 
+def read_wav_mono(input_path: Path) -> np.ndarray:
+    with wave.open(str(input_path), "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        sample_rate = wav_file.getframerate()
+        frames = wav_file.readframes(wav_file.getnframes())
+
+    if channels != 1:
+        raise ValueError(f"Expected mono WAV, got {channels} channels: {input_path}")
+    if sample_width != 2:
+        raise ValueError(f"Expected 16-bit WAV, got {sample_width * 8}-bit: {input_path}")
+    if sample_rate != SAMPLE_RATE:
+        raise ValueError(f"Expected {SAMPLE_RATE} Hz WAV, got {sample_rate} Hz: {input_path}")
+
+    audio = np.frombuffer(frames, dtype=np.int16)
+    return audio.astype(np.float32) / 32768.0
+
+
 def transcribe_chunk(recognizer, chunk_path: Path) -> dict:
+    audio = read_wav_mono(chunk_path)
     return recognizer(
-        str(chunk_path),
+        {"array": audio, "sampling_rate": SAMPLE_RATE},
         return_timestamps=True,
         generate_kwargs={"language": "ru", "task": "transcribe"},
     )
@@ -139,7 +164,12 @@ def normalize_chunk_result(result: dict, offset_seconds: float, skip_before: flo
         if end is not None and end <= skip_before:
             continue
 
-        absolute_start = None if start is None else offset_seconds + max(start, skip_before)
+        clipped_start = None if start is None else max(start, skip_before)
+        if clipped_start is not None and end is not None:
+            if end - clipped_start < MIN_SEGMENT_SECONDS:
+                continue
+
+        absolute_start = None if clipped_start is None else offset_seconds + clipped_start
         absolute_end = None if end is None else offset_seconds + end
         normalized.append(
             {
@@ -292,7 +322,7 @@ def render_timestamps(result: dict) -> str:
         start, end = chunk.get("timestamp", (None, None))
         text = chunk.get("text", "").strip()
         if text:
-            lines.append(f"{format_timestamp(start)} - {format_timestamp(end)} {text}")
+            lines.append(f"{format_timestamp(start)} - {format_timestamp(end, '--:--:--')} {text}")
 
     return "\n".join(lines)
 
