@@ -1,4 +1,4 @@
 torch
 transformers
 accelerate
-ffmpeg-python
+imageio-ffmpeg

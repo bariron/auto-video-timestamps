@@ -6,6 +6,8 @@ The project starts as a small command-line tool and will grow into a workflow fo
 
 ## Setup
 
+The app uses FFmpeg to read long videos and split them into audio chunks. On Windows, `imageio-ffmpeg` usually provides a bundled FFmpeg binary through `requirements.txt`.
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -16,6 +18,12 @@ pip install -r requirements.txt
 
 ```powershell
 python run_whisper.py path\to\video.mp4 --output timestamps.txt
+```
+
+Long lectures are split into 10-minute chunks by default:
+
+```powershell
+python run_whisper.py lecture.mp4 --chunk-seconds 600 --overlap-seconds 5 --output timestamps.txt
 ```
 
 You can also save the raw Whisper output:
