@@ -1,8 +1,9 @@
-"""Process a YouTube or public Yandex Disk media link with Whisper."""
+"""Transcribe a YouTube or public Yandex Disk link and generate topic chapters."""
 
 import argparse
 import hashlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,19 @@ def reject_live(info, *, incomplete=False):
     return None
 
 
+def youtube_js_runtimes():
+    executable = "deno.exe" if sys.platform == "win32" else "deno"
+    candidates = [shutil.which("deno"), Path(__file__).resolve().parent / ".tools" / executable,
+                  Path.home() / ".deno" / "bin" / executable]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return {"deno": {"path": str(candidate)}}
+    if node := shutil.which("node"):
+        return {"node": {"path": node}}
+    raise RuntimeError("Для YouTube нужен Deno. Установите его: winget install --id DenoLand.Deno -e, "
+                       "либо поместите deno.exe в .tools проекта. Затем перезапустите приложение.")
+
+
 def download_youtube_audio(url: str, directory: Path) -> Path:
     try:
         from yt_dlp import YoutubeDL
@@ -49,7 +63,13 @@ def download_youtube_audio(url: str, directory: Path) -> Path:
         "outtmpl": str(directory / "audio.%(ext)s"),
         "noplaylist": True,
         "match_filter": reject_live,
-        "js_runtimes": {"deno": {}, "node": {}},
+        "js_runtimes": youtube_js_runtimes(),
+        "socket_timeout": 60,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_retries": 3,
+        "http_chunk_size": 4 * 1024 * 1024,
+        "retry_sleep_functions": {"http": lambda n: min(2 * n, 10)},
     }
     try:
         with YoutubeDL(options) as downloader:
@@ -58,6 +78,10 @@ def download_youtube_audio(url: str, directory: Path) -> Path:
                 raise RuntimeError("No downloadable completed video was returned.")
             path = Path(downloader.prepare_filename(info))
     except DownloadError as exc:
+        if any(word in str(exc).lower() for word in ("timed out", "timeout", "connection", "network is unreachable")):
+            raise RuntimeError("Не удалось скачать аудио с серверов YouTube: сетевое соединение прерывается. "
+                               "Проверьте доступ к YouTube из этой сети и настройки VPN/прокси. "
+                               f"Подробности: {exc}") from exc
         raise RuntimeError(
             f"YouTube download failed: {exc}\n"
             'Try updating with python -m pip install -U "yt-dlp[default]" '
@@ -74,14 +98,20 @@ def main() -> None:
     parser.add_argument("--disk-path", help="File path within a public Yandex Disk folder, e.g. /video.mp4.")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
     parser.add_argument("--model", help="Override the existing Whisper model.")
+    parser.add_argument("--chapter-model", help="Override the chapter generation model.")
+    parser.add_argument("--skip-chapters", action="store_true", help="Only transcribe; skip topic chapters.")
     parser.add_argument("--chunk-seconds", type=int, default=600)
     parser.add_argument("--overlap-seconds", type=int, default=5)
     parser.add_argument("--max-duration-seconds", type=int)
     parser.add_argument("--plan-only", action="store_true", help="Download audio and print the plan without loading Whisper.")
     args = parser.parse_args()
+    stage = "Whisper processing"
     try:
         is_disk = urlparse(args.url.strip()).hostname in yandex_disk.HOSTS
-        url = yandex_disk.normalize_public_url(args.url) if is_disk else normalize_youtube_url(args.url)
+        if is_disk:
+            url, args.disk_path = yandex_disk.split_public_url(args.url, args.disk_path)
+        else:
+            url = normalize_youtube_url(args.url)
         if args.disk_path is not None and (not is_disk or not args.disk_path.startswith("/")):
             raise ValueError("--disk-path requires a Yandex Disk link and a path starting with '/'.")
         if args.chunk_seconds <= 0 or not 0 <= args.overlap_seconds < args.chunk_seconds:
@@ -95,6 +125,7 @@ def main() -> None:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         base = args.output_dir / source_id
         with tempfile.TemporaryDirectory(prefix="video-source-") as directory:
+            print("Downloading media...", flush=True)
             if is_disk:
                 audio_path = yandex_disk.download_public_media(url, Path(directory), args.disk_path)
             else:
@@ -112,13 +143,28 @@ def main() -> None:
                 command.extend(["--max-duration-seconds", str(args.max_duration_seconds)])
             if args.plan_only:
                 command.append("--plan-only")
+            print("Transcribing with Whisper...", flush=True)
             subprocess.run(command, check=True)
         if not args.plan_only:
             print(f"Saved: {base}_timestamps.txt\nSaved: {base}_result.json")
+            if not args.skip_chapters:
+                stage = "Chapter generation (Whisper results are saved)"
+                print("Generating topic chapters...", flush=True)
+                command = [
+                    sys.executable, str(Path(__file__).with_name("generate_chapters.py")),
+                    str(base) + "_result.json",
+                    "--prompt-mode", "detailed",
+                    "--output", str(base) + "_chapters.txt",
+                    "--json", str(base) + "_chapters.json",
+                ]
+                if args.chapter_model:
+                    command.extend(["--model", args.chapter_model])
+                subprocess.run(command, check=True)
+                print(f"Saved: {base}_chapters.txt\nSaved: {base}_chapters.json")
     except (ValueError, RuntimeError, OSError) as exc:
         parser.exit(1, f"Error: {exc}\n")
     except subprocess.CalledProcessError as exc:
-        parser.exit(exc.returncode, "Whisper processing failed; see the error above.\n")
+        parser.exit(exc.returncode, f"{stage} failed; see the error above.\n")
 
 
 if __name__ == "__main__":

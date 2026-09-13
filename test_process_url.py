@@ -1,4 +1,5 @@
 import subprocess
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,28 @@ class ProcessUrlTests(unittest.TestCase):
         self.assertIsNotNone(process_url.reject_live({"live_status": "is_upcoming"}))
         self.assertIsNone(process_url.reject_live({"live_status": "was_live"}))
 
+    def test_youtube_runtime_discovery_and_missing_runtime_error(self):
+        with patch.object(process_url.shutil, "which", return_value=None), \
+                patch.object(Path, "is_file", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "Deno"):
+                process_url.youtube_js_runtimes()
+        with patch.object(process_url.shutil, "which", return_value=None), \
+                patch.object(Path, "is_file", side_effect=lambda: True):
+            self.assertIn("deno", process_url.youtube_js_runtimes())
+
+    def test_youtube_download_options_and_network_error(self):
+        from yt_dlp.utils import DownloadError
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(process_url, "youtube_js_runtimes", return_value={"deno": {"path": "deno.exe"}}), \
+                patch("yt_dlp.YoutubeDL") as downloader:
+            downloader.return_value.__enter__.return_value.extract_info.side_effect = DownloadError("Read timed out")
+            with self.assertRaisesRegex(RuntimeError, "сетевое соединение"):
+                process_url.download_youtube_audio("https://youtu.be/abcdefghijk", Path(directory))
+            options = downloader.call_args.args[0]
+            self.assertEqual(options["socket_timeout"], 60)
+            self.assertEqual(options["retries"], 5)
+            self.assertEqual(options["js_runtimes"]["deno"]["path"], "deno.exe")
+
     def test_pipeline_passes_options_and_cleans_audio_on_success_and_failure(self):
         for fail in [False, True]:
             with self.subTest(fail=fail), tempfile.TemporaryDirectory() as output:
@@ -51,7 +74,7 @@ class ProcessUrlTests(unittest.TestCase):
                         raise subprocess.CalledProcessError(2, command)
 
                 argv = ["process_url.py", "https://youtu.be/abcdefghijk",
-                        "--output-dir", output, "--max-duration-seconds", "300"]
+                        "--output-dir", output, "--max-duration-seconds", "300", "--skip-chapters"]
                 with patch("sys.argv", argv), patch.object(process_url, "download_youtube_audio", download), \
                         patch.object(process_url.subprocess, "run", run):
                     if fail:
@@ -61,6 +84,56 @@ class ProcessUrlTests(unittest.TestCase):
                     else:
                         process_url.main()
                 self.assertFalse(paths[0].parent.exists())
+
+    def test_chapters_follow_transcription_for_both_sources(self):
+        for url in ["https://youtu.be/abcdefghijk", "https://disk.yandex.ru/d/key"]:
+            for mode in ["success", "whisper_failure", "chapter_failure", "plan", "skip"]:
+                with self.subTest(url=url, mode=mode), tempfile.TemporaryDirectory() as output:
+                    calls = []
+                    paths = []
+
+                    def download(url, directory, *args):
+                        media = directory / "media.mp4"
+                        media.write_bytes(b"video")
+                        paths.append(media)
+                        return media
+
+                    def run(command, check):
+                        calls.append(command)
+                        if len(calls) == 1:
+                            self.assertTrue(paths[0].exists())
+                            if mode == "whisper_failure":
+                                raise subprocess.CalledProcessError(2, command)
+                            if mode != "plan":
+                                Path(command[command.index("--json") + 1]).write_text('{"chunks": []}')
+                        else:
+                            self.assertFalse(paths[0].exists())
+                            self.assertEqual(Path(command[1]).name, "generate_chapters.py")
+                            self.assertEqual(command[2], calls[0][calls[0].index("--json") + 1])
+                            self.assertTrue(Path(command[2]).exists())
+                            self.assertEqual(command[command.index("--model") + 1], "test-model")
+                            self.assertEqual(command[command.index("--prompt-mode") + 1], "detailed")
+                            if mode == "chapter_failure":
+                                raise subprocess.CalledProcessError(3, command)
+
+                    argv = ["process_url.py", url, "--output-dir", output, "--chapter-model", "test-model"]
+                    argv += {"plan": ["--plan-only"], "skip": ["--skip-chapters"]}.get(mode, [])
+                    with patch("sys.argv", argv), \
+                            patch.object(process_url, "download_youtube_audio", download), \
+                            patch.object(process_url.yandex_disk, "download_public_media", download), \
+                            patch.object(process_url.subprocess, "run", run), \
+                            patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                        if mode.endswith("failure"):
+                            with self.assertRaises(SystemExit) as error:
+                                process_url.main()
+                            self.assertEqual(error.exception.code, 2 if mode == "whisper_failure" else 3)
+                            if mode == "chapter_failure":
+                                self.assertIn("Whisper results are saved", stderr.getvalue())
+                                self.assertTrue(Path(calls[1][2]).exists())
+                        else:
+                            process_url.main()
+                    self.assertEqual(len(calls), 2 if mode in {"success", "chapter_failure"} else 1)
+                    self.assertFalse(paths[0].parent.exists())
 
 
 if __name__ == "__main__":

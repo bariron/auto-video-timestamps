@@ -16,6 +16,22 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Local web application
+
+Install `requirements.txt`, then run:
+
+```powershell
+python web_app.py
+```
+
+Open http://127.0.0.1:7860. The Russian-language interface accepts YouTube and public Yandex Disk links, including full links to files inside shared folders. It queues videos, shows processing stages and logs, and provides chapter/transcript previews and TXT/JSON downloads. The optional preview mode transcribes only the first five minutes; it still downloads the entire source.
+
+Whisper and chapter generation run sequentially in a background worker on this computer. Keep the server running while processing; closing the browser tab is fine. The server is local only, with one process and one video processed at a time. Change the port with `python web_app.py --port 7861`.
+
+Jobs and their results are stored in `outputs/web_jobs/`. Existing results under `outputs/` also appear in the library. Queued jobs resume after a server restart; interrupted running jobs are marked as failed. Submit the link again to retry. Transcripts remain available if chapter generation fails. Automatically generated chapters still need review.
+
+### Command line
+
 Put lecture videos or audio files into `data/`. Generated transcripts and timestamps go to `outputs/`.
 
 Process every lecture from `data/`:
@@ -59,6 +75,8 @@ python run_whisper.py path\to\video.mp4 --output timestamps.txt --json result.js
 
 Install the requirements above (Python 3.10+) and [Deno](https://docs.deno.com/runtime/getting_started/installation/), or a supported Node.js version. YouTube downloads use the [yt-dlp Python API](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp); its current [JavaScript runtime requirements](https://github.com/yt-dlp/yt-dlp/wiki/EJS) apply. No API key is needed.
 
+On Windows, install Deno with `winget install --id DenoLand.Deno -e` and restart the app, or put the official `deno.exe` in `.tools/` in the project. The wrapper also checks `PATH` and `~/.deno/bin`. A missing runtime now produces an explicit setup error before downloading. Downloads use a 60-second socket timeout, bounded retries and 4 MiB HTTP chunks. Network timeouts are reported separately from runtime setup problems.
+
 ```sh
 python process_url.py "https://www.youtube.com/watch?v=VIDEO_ID"
 python process_url.py "https://youtu.be/VIDEO_ID" --max-duration-seconds 300 --chunk-seconds 60
@@ -99,13 +117,21 @@ Folders require `--disk-path`; non-media files are rejected. Private or password
 
 ## Generate Chapters
 
-After transcription, use a small language model to group speech segments into meaningful chapters:
+`process_url.py` automatically generates topic chapters after Whisper for both YouTube and Yandex Disk. In addition to the transcript, it saves `<source>_chapters.txt` (chapter timestamps and titles) and `<source>_chapters.json` in the output directory. Repeating a run overwrites these files.
+
+The chapter step uses `Qwen/Qwen3-4B-Instruct-2507`; about 8 GB of model weights are downloaded on first use. Override it with `--chapter-model`. Use `--skip-chapters` for transcription only. `--plan-only` skips both models. If chapter generation fails, the command reports an error and keeps the Whisper results so you can retry just this step. Generated titles and topic boundaries still need review.
+
+To generate chapters separately from an existing transcript (including results from `process_data.py` or `run_whisper.py`):
 
 ```powershell
 python generate_chapters.py result.json --output chapters.txt --json chapters.json
 ```
 
-By default, chapter generation uses exact Whisper segments as timestamps. For very long lectures, you can use the compressed mode:
+The default `detailed` mode reads the **entire transcript** in batches of up to eight minutes / 14,000 characters, loading the model once. Each batch gets several concrete topic headings, typically one per 2–4 minutes. There is no global ten-chapter cap and no discarded text. Timestamp IDs are checked against source segments; missing batch coverage, invalid JSON and vague short titles trigger retries. A failed batch fails the run without replacing existing chapter files. The JSON includes source segment IDs and text for review; `.generation.json` records the model responses.
+
+Tune batch size with `--batch-seconds` and `--batch-max-chars`. The old `exact` and `compressed` single-prompt modes remain available for comparisons; `--min-chapters`, `--max-chapters` and `--min-gap-seconds` apply only to those legacy modes. Compressed mode discards part of the transcript and is unsuitable for detailed chapters of long lectures:
+
+Repeating chapter generation with the same input, model and prompts reuses validated batches from `.generation.json`. Changes to the input, model or prompts invalidate that checkpoint. The web library notices updated chapter files without having to resubmit the video.
 
 ```powershell
 python generate_chapters.py result.json --prompt-mode compressed --output chapters.txt --json chapters.json

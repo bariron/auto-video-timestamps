@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
+from urllib.parse import unquote, urlencode, urlparse
 from urllib.request import urlopen
 
 
@@ -13,6 +13,21 @@ HOSTS = {"disk.yandex.ru", "disk.yandex.com", "disk.yandex.by",
 API = "https://cloud-api.yandex.net/v1/disk/public/resources"
 MEDIA_EXTENSIONS = {".avi", ".m4a", ".mkv", ".mov", ".mp3", ".mp4", ".wav",
                     ".webm", ".flac", ".ogg", ".opus", ".aac", ".m4v", ".wma"}
+
+
+def split_public_url(value: str, resource_path: str | None = None) -> tuple[str, str | None]:
+    """Accept a shared root URL or a browser URL to a file within it."""
+    parsed = urlparse(value.strip())
+    parts = parsed.path.split("/", 3)
+    if len(parts) == 4 and parts[3]:
+        embedded_path = "/" + unquote(parts[3])
+        if resource_path and resource_path != embedded_path:
+            raise ValueError("The URL path and --disk-path refer to different files.")
+        resource_path = embedded_path
+        parsed = parsed._replace(path="/".join(parts[:3]))
+    if resource_path and not resource_path.startswith("/"):
+        raise ValueError("Yandex Disk file path must start with '/'.")
+    return normalize_public_url(parsed.geturl()), resource_path
 
 
 def normalize_public_url(value: str) -> str:
