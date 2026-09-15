@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auto-video-timestamps"
+version = "0.1.0"
+description = "Local web application for video transcripts and topic chapters"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch", "transformers", "accelerate", "imageio-ffmpeg", "numpy",
+    "yt-dlp[default]", "Flask>=3.1,<4", "waitress>=3,<4",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.11"]
+
+[project.scripts]
+video-timestamps = "video_timestamps.web:main"
+video-timestamps-url = "video_timestamps.pipeline:main"
+video-timestamps-transcribe = "video_timestamps.transcription:main"
+video-timestamps-chapters = "video_timestamps.chapters:main"
+video-timestamps-batch = "video_timestamps.batch:main"
+
+[tool.setuptools.packages.find]
+include = ["video_timestamps*"]
+
+[tool.setuptools.package-data]
+video_timestamps = ["templates/*.html", "static/*.css", "static/*.js"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

@@ -10,7 +10,8 @@ import tempfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-import yandex_disk
+from .paths import OUTPUT_DIR, PROJECT_ROOT
+from .sources import yandex_disk
 
 
 def normalize_youtube_url(value: str) -> str:
@@ -40,15 +41,20 @@ def reject_live(info, *, incomplete=False):
 
 def youtube_js_runtimes():
     executable = "deno.exe" if sys.platform == "win32" else "deno"
-    candidates = [shutil.which("deno"), Path(__file__).resolve().parent / ".tools" / executable,
-                  Path.home() / ".deno" / "bin" / executable]
+    candidates = [
+        shutil.which("deno"),
+        PROJECT_ROOT / ".tools" / executable,
+        Path.home() / ".deno" / "bin" / executable,
+    ]
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return {"deno": {"path": str(candidate)}}
     if node := shutil.which("node"):
         return {"node": {"path": node}}
-    raise RuntimeError("Для YouTube нужен Deno. Установите его: winget install --id DenoLand.Deno -e, "
-                       "либо поместите deno.exe в .tools проекта. Затем перезапустите приложение.")
+    raise RuntimeError(
+        "Для YouTube нужен Deno. Установите его: winget install --id DenoLand.Deno -e, "
+        "либо поместите deno.exe в .tools проекта. Затем перезапустите приложение."
+    )
 
 
 def download_youtube_audio(url: str, directory: Path) -> Path:
@@ -56,7 +62,9 @@ def download_youtube_audio(url: str, directory: Path) -> Path:
         from yt_dlp import YoutubeDL
         from yt_dlp.utils import DownloadError
     except ImportError as exc:
-        raise RuntimeError('Install YouTube support: python -m pip install -U "yt-dlp[default]"') from exc
+        raise RuntimeError(
+            'Install YouTube support: python -m pip install -U "yt-dlp[default]"'
+        ) from exc
 
     options = {
         "format": "bestaudio/best",
@@ -78,32 +86,47 @@ def download_youtube_audio(url: str, directory: Path) -> Path:
                 raise RuntimeError("No downloadable completed video was returned.")
             path = Path(downloader.prepare_filename(info))
     except DownloadError as exc:
-        if any(word in str(exc).lower() for word in ("timed out", "timeout", "connection", "network is unreachable")):
-            raise RuntimeError("Не удалось скачать аудио с серверов YouTube: сетевое соединение прерывается. "
-                               "Проверьте доступ к YouTube из этой сети и настройки VPN/прокси. "
-                               f"Подробности: {exc}") from exc
+        if any(
+            word in str(exc).lower()
+            for word in ("timed out", "timeout", "connection", "network is unreachable")
+        ):
+            raise RuntimeError(
+                "Не удалось скачать аудио с серверов YouTube: сетевое соединение прерывается. "
+                "Проверьте доступ к YouTube из этой сети и настройки VPN/прокси. "
+                f"Подробности: {exc}"
+            ) from exc
         raise RuntimeError(
             f"YouTube download failed: {exc}\n"
             'Try updating with python -m pip install -U "yt-dlp[default]" '
             "and ensure Deno or Node.js is installed."
         ) from exc
     if not path.is_file():
-        raise RuntimeError("YouTube audio was not downloaded (the video may be live or unavailable).")
+        raise RuntimeError(
+            "YouTube audio was not downloaded (the video may be live or unavailable)."
+        )
     return path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url", help="YouTube or public Yandex Disk video/audio URL.")
-    parser.add_argument("--disk-path", help="File path within a public Yandex Disk folder, e.g. /video.mp4.")
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
+    parser.add_argument(
+        "--disk-path", help="File path within a public Yandex Disk folder, e.g. /video.mp4."
+    )
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--model", help="Override the existing Whisper model.")
     parser.add_argument("--chapter-model", help="Override the chapter generation model.")
-    parser.add_argument("--skip-chapters", action="store_true", help="Only transcribe; skip topic chapters.")
+    parser.add_argument(
+        "--skip-chapters", action="store_true", help="Only transcribe; skip topic chapters."
+    )
     parser.add_argument("--chunk-seconds", type=int, default=600)
     parser.add_argument("--overlap-seconds", type=int, default=5)
     parser.add_argument("--max-duration-seconds", type=int)
-    parser.add_argument("--plan-only", action="store_true", help="Download audio and print the plan without loading Whisper.")
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Download audio and print the plan without loading Whisper.",
+    )
     args = parser.parse_args()
     stage = "Whisper processing"
     try:
@@ -113,13 +136,20 @@ def main() -> None:
         else:
             url = normalize_youtube_url(args.url)
         if args.disk_path is not None and (not is_disk or not args.disk_path.startswith("/")):
-            raise ValueError("--disk-path requires a Yandex Disk link and a path starting with '/'.")
+            raise ValueError(
+                "--disk-path requires a Yandex Disk link and a path starting with '/'."
+            )
         if args.chunk_seconds <= 0 or not 0 <= args.overlap_seconds < args.chunk_seconds:
-            raise ValueError("Require --chunk-seconds > 0 and 0 <= --overlap-seconds < --chunk-seconds.")
+            raise ValueError(
+                "Require --chunk-seconds > 0 and 0 <= --overlap-seconds < --chunk-seconds."
+            )
         if args.max_duration_seconds is not None and args.max_duration_seconds <= 0:
             raise ValueError("--max-duration-seconds must be greater than 0.")
         if is_disk:
-            source_id = "yandex_" + hashlib.sha256((url + "\n" + (args.disk_path or "")).encode()).hexdigest()[:16]
+            source_id = (
+                "yandex_"
+                + hashlib.sha256((url + "\n" + (args.disk_path or "")).encode()).hexdigest()[:16]
+            )
         else:
             source_id = "youtube_" + parse_qs(urlparse(url).query)["v"][0]
         args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -131,11 +161,18 @@ def main() -> None:
             else:
                 audio_path = download_youtube_audio(url, Path(directory))
             command = [
-                sys.executable, str(Path(__file__).with_name("run_whisper.py")), str(audio_path),
-                "--output", str(base.with_name(base.name + "_timestamps.txt")),
-                "--json", str(base.with_name(base.name + "_result.json")),
-                "--chunk-seconds", str(args.chunk_seconds),
-                "--overlap-seconds", str(args.overlap_seconds),
+                sys.executable,
+                "-m",
+                "video_timestamps.transcription",
+                str(audio_path),
+                "--output",
+                str(base.with_name(base.name + "_timestamps.txt")),
+                "--json",
+                str(base.with_name(base.name + "_result.json")),
+                "--chunk-seconds",
+                str(args.chunk_seconds),
+                "--overlap-seconds",
+                str(args.overlap_seconds),
             ]
             if args.model:
                 command.extend(["--model", args.model])
@@ -151,11 +188,14 @@ def main() -> None:
                 stage = "Chapter generation (Whisper results are saved)"
                 print("Generating topic chapters...", flush=True)
                 command = [
-                    sys.executable, str(Path(__file__).with_name("generate_chapters.py")),
+                    sys.executable,
+                    "-m",
+                    "video_timestamps.chapters",
                     str(base) + "_result.json",
-                    "--prompt-mode", "detailed",
-                    "--output", str(base) + "_chapters.txt",
-                    "--json", str(base) + "_chapters.json",
+                    "--output",
+                    str(base) + "_chapters.txt",
+                    "--json",
+                    str(base) + "_chapters.json",
                 ]
                 if args.chapter_model:
                     command.extend(["--model", args.chapter_model])

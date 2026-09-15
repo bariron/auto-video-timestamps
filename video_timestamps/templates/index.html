@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Таймкоды — видео по главам</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body>
+  <header><a class="brand" href="/">▤ <span>таймкоды</span></a></header>
+  <main>
+    <section class="intro"><h1>Длинное видео.<br><span>Понятные главы.</span></h1></section>
+    <section class="card new-job" aria-labelledby="new-title">
+      <div class="card-heading"><h2 id="new-title">Новое видео</h2><span class="sources">YouTube / Яндекс Диск</span></div>
+      <form id="new-job">
+        <label for="url">Ссылка на видео или аудио</label>
+        <div class="input-row"><input id="url" name="url" type="url" required placeholder="https://disk.yandex.ru/…" autocomplete="off"><button id="submit" type="submit">Создать таймкоды <span>↗</span></button></div>
+        <div class="form-bottom"><details><summary>Путь внутри папки Яндекс Диска</summary><label for="disk-path">Путь к файлу</label><input id="disk-path" placeholder="/Лекции/семинар.mp4"></details></div>
+        <p id="form-message" role="status" hidden></p>
+      </form>
+    </section>
+    <section id="queue-section" hidden><div class="section-heading"><h2 id="queue-title">В работе</h2></div><div id="jobs"></div></section>
+    <section><div class="section-heading"><h2>Результаты <span id="result-count" class="count">0</span></h2><button id="refresh" class="text-button">Обновить ↻</button></div>
+      <p id="connection-error" role="alert" hidden></p>
+      <div class="library"><nav id="results" aria-label="Обработанные видео"></nav><article id="detail" class="card detail"><div class="empty"><span>▤</span><h3>Здесь появятся ваши таймкоды</h3></div></article></div>
+    </section>
+  </main>
+  <dialog id="log-dialog"><div class="card-heading"><h2>Журнал обработки</h2><button id="close-log" class="text-button">Закрыть ×</button></div><pre id="log-text"></pre></dialog>
+</body>
+</html>

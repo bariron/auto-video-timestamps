@@ -1,0 +1,1 @@
+"""Public media source adapters."""

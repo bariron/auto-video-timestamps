@@ -7,12 +7,31 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlencode, urlparse
 from urllib.request import urlopen
 
-
-HOSTS = {"disk.yandex.ru", "disk.yandex.com", "disk.yandex.by",
-         "disk.yandex.kz", "disk.yandex.com.tr", "yadi.sk"}
+HOSTS = {
+    "disk.yandex.ru",
+    "disk.yandex.com",
+    "disk.yandex.by",
+    "disk.yandex.kz",
+    "disk.yandex.com.tr",
+    "yadi.sk",
+}
 API = "https://cloud-api.yandex.net/v1/disk/public/resources"
-MEDIA_EXTENSIONS = {".avi", ".m4a", ".mkv", ".mov", ".mp3", ".mp4", ".wav",
-                    ".webm", ".flac", ".ogg", ".opus", ".aac", ".m4v", ".wma"}
+MEDIA_EXTENSIONS = {
+    ".avi",
+    ".m4a",
+    ".mkv",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".wav",
+    ".webm",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".aac",
+    ".m4v",
+    ".wma",
+}
 
 
 def split_public_url(value: str, resource_path: str | None = None) -> tuple[str, str | None]:
@@ -32,10 +51,17 @@ def split_public_url(value: str, resource_path: str | None = None) -> tuple[str,
 
 def normalize_public_url(value: str) -> str:
     parsed = urlparse(value.strip())
-    if (parsed.scheme not in {"http", "https"} or parsed.hostname not in HOSTS
-            or parsed.username or parsed.password or parsed.port is not None
-            or not re.fullmatch(r"/[di]/[A-Za-z0-9_-]+/?", parsed.path)):
-        raise ValueError("Expected a public Yandex Disk file link, such as https://disk.yandex.ru/i/KEY.")
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname not in HOSTS
+        or parsed.username
+        or parsed.password
+        or parsed.port is not None
+        or not re.fullmatch(r"/[di]/[A-Za-z0-9_-]+/?", parsed.path)
+    ):
+        raise ValueError(
+            "Expected a public Yandex Disk file link, such as https://disk.yandex.ru/i/KEY."
+        )
     return f"https://{parsed.hostname}{parsed.path.rstrip('/')}"
 
 
@@ -54,7 +80,9 @@ def download_public_media(url: str, directory: Path, resource_path: str | None =
     try:
         metadata = api_request("", params)
         if metadata.get("type") == "dir":
-            raise ValueError("This link points to a folder. Select a file with --disk-path '/video.mp4'.")
+            raise ValueError(
+                "This link points to a folder. Select a file with --disk-path '/video.mp4'."
+            )
         if metadata.get("type") != "file":
             raise RuntimeError("Yandex Disk did not return a file.")
         suffix = Path(str(metadata.get("name", ""))).suffix.lower()
@@ -63,8 +91,12 @@ def download_public_media(url: str, directory: Path, resource_path: str | None =
             raise ValueError("The selected Yandex Disk resource is not a video or audio file.")
         link = api_request("/download", params)
         href = link.get("href")
-        if (not isinstance(href, str) or urlparse(href).scheme != "https"
-                or not urlparse(href).hostname or link.get("method", "GET") != "GET"):
+        if (
+            not isinstance(href, str)
+            or urlparse(href).scheme != "https"
+            or not urlparse(href).hostname
+            or link.get("method", "GET") != "GET"
+        ):
             raise RuntimeError("Yandex Disk returned an invalid download link.")
         # Never use the remote filename as a local path.
         target = directory / ("media" + (suffix if suffix in MEDIA_EXTENSIONS else ".bin"))
@@ -78,9 +110,14 @@ def download_public_media(url: str, directory: Path, resource_path: str | None =
             raise RuntimeError("Yandex Disk download is empty or incomplete; retry the download.")
         return target
     except HTTPError as exc:
-        hints = {403: "Access or downloading is forbidden.", 404: "Public file not found.",
-                 429: "Too many requests; try again later."}
-        raise RuntimeError(f"Yandex Disk HTTP {exc.code}: "
-                           + hints.get(exc.code, "Could not download the public file.")) from exc
+        hints = {
+            403: "Access or downloading is forbidden.",
+            404: "Public file not found.",
+            429: "Too many requests; try again later.",
+        }
+        raise RuntimeError(
+            f"Yandex Disk HTTP {exc.code}: "
+            + hints.get(exc.code, "Could not download the public file.")
+        ) from exc
     except URLError as exc:
         raise RuntimeError(f"Yandex Disk connection failed: {exc.reason}") from exc

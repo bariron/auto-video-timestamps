@@ -2,11 +2,10 @@ import argparse
 import json
 from pathlib import Path
 
-from run_whisper import render_timestamps, transcribe_long_media
+from .paths import INPUT_DIR as DEFAULT_INPUT_DIR
+from .paths import OUTPUT_DIR as DEFAULT_OUTPUT_DIR
+from .transcription import render_timestamps, transcribe_long_media
 
-
-DEFAULT_INPUT_DIR = Path("data")
-DEFAULT_OUTPUT_DIR = Path("outputs")
 MEDIA_EXTENSIONS = {
     ".avi",
     ".m4a",

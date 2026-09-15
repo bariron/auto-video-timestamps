@@ -10,7 +10,6 @@ from pathlib import Path
 
 import numpy as np
 
-
 DEFAULT_MODEL = "coriollon/whisper-large-v3-turbo-russian-codeswitch"
 SAMPLE_RATE = 16000
 MIN_SEGMENT_SECONDS = 1.0
@@ -365,11 +364,6 @@ def main() -> None:
         help="Only process the first N seconds of the input file.",
     )
     parser.add_argument(
-        "--prototype-5min",
-        action="store_true",
-        help="Process the first 5 minutes with 60-second chunks.",
-    )
-    parser.add_argument(
         "--plan-only",
         action="store_true",
         help="Print the chunk plan without loading Whisper or transcribing.",
@@ -378,12 +372,6 @@ def main() -> None:
 
     if not args.input.exists():
         raise FileNotFoundError(f"Input file not found: {args.input}")
-
-    if args.prototype_5min:
-        if args.max_duration_seconds is None:
-            args.max_duration_seconds = 300
-        if "--chunk-seconds" not in sys.argv:
-            args.chunk_seconds = 60
 
     if args.plan_only:
         print(

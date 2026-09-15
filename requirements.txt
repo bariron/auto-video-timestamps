@@ -1,9 +1,1 @@
-torch
-transformers
-accelerate
-imageio-ffmpeg
-numpy
-reportlab
-yt-dlp[default]
-Flask>=3.1,<4
-waitress>=3,<4
+-e .
